@@ -10,6 +10,7 @@ import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
+import android.os.Handler;
 import android.text.InputFilter;
 import android.text.InputType;
 import android.util.TypedValue;
@@ -87,6 +88,7 @@ import static android.view.View.FOCUS_RIGHT;
 import static android.view.View.GONE;
 import static android.view.View.INVISIBLE;
 import static android.view.View.VISIBLE;
+import static android.view.ViewConfiguration.getLongPressTimeout;
 import static android.view.ViewGroup.LayoutParams.MATCH_PARENT;
 import static android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
 import static android.view.WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM;
@@ -1333,20 +1335,18 @@ public class SmbFileChooserDialog extends LightContextWrapper implements DialogI
         });
 
         this._list = this._alertDialog.getListView();
-        this._list.setOnItemClickListener(this);
-        if (this._enableMultiple) {
-            this._list.setOnItemLongClickListener(this);
-        }
 
-        //this._list.setOnTouchListener((v, event) -> !_isScrollable && event.getAction() == MotionEvent.ACTION_MOVE);
-
-        if (this._enableDpad) {
+        if (_enableDpad) {
             this._list.setSelector(listview_item_selector);
             this._list.setDrawSelectorOnTop(true);
             this._list.setItemsCanFocus(true);
             this._list.setOnItemSelectedListener(this);
             this._list.setChoiceMode(ListView.CHOICE_MODE_SINGLE);
+        } else {
+            this._list.setOnItemClickListener(this);
+            if (this._enableMultiple) this._list.setOnItemLongClickListener(this);
         }
+
         return this;
     }
 
@@ -1641,6 +1641,10 @@ public class SmbFileChooserDialog extends LightContextWrapper implements DialogI
         });
     }
 
+    void performSelectedItemClick() {
+        onItemClick(_list, _list.getSelectedView(), _list.getSelectedItemPosition(), _list.getSelectedItemId());
+    }
+
     @Override
     public void onItemClick(@Nullable final AdapterView<?> parent, @NonNull final View list, final int position, final long id) {
         try {
@@ -1724,6 +1728,10 @@ public class SmbFileChooserDialog extends LightContextWrapper implements DialogI
         }
     }
 
+    void performSelectedItemLongClick() {
+        onItemLongClick(_list, _list.getSelectedView(), _list.getSelectedItemPosition(), _list.getSelectedItemId());
+    }
+
     @Override
     public boolean onItemLongClick(@Nullable final AdapterView<?> parent, @NonNull final View list, final int position, final long id) {
         try {
@@ -1764,8 +1772,23 @@ public class SmbFileChooserDialog extends LightContextWrapper implements DialogI
         lastSelected = false;
     }
 
+    private final int longClickDuration = getLongPressTimeout();
+    private boolean isPressHeld = false;
+    private boolean isLongPress = false;
+
     @Override
     public boolean onKey(final DialogInterface dialog, final int keyCode, final KeyEvent event) {
+        if (_btnNeutral == null) return false;
+
+        if (_enableDpad && _list.hasFocus() && event.getAction() == KeyEvent.ACTION_UP && (keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_SPACE || keyCode == KeyEvent.KEYCODE_DPAD_CENTER)) {
+            isPressHeld = false;
+            if (!isLongPress) {
+                performSelectedItemClick();
+            }
+            else isLongPress = false;
+            return true;
+        }
+
         if (_progressBar != null && _progressBar.getVisibility() == VISIBLE) return true;
         if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
 
@@ -1784,7 +1807,6 @@ public class SmbFileChooserDialog extends LightContextWrapper implements DialogI
         if (!_list.hasFocus()) {
             switch (keyCode) {
                 case KeyEvent.KEYCODE_DPAD_UP:
-                    if (_btnNeutral == null) return false;
                     if (_btnNeutral.hasFocus() || _btnNegative.hasFocus() || _btnPositive.hasFocus()) {
                         if (_options != null && _options.getVisibility() == VISIBLE) {
                             _options.requestFocus(_btnNeutral.hasFocus() ? FOCUS_RIGHT : FOCUS_LEFT);
@@ -1812,6 +1834,20 @@ public class SmbFileChooserDialog extends LightContextWrapper implements DialogI
 
         if (_list.hasFocus()) {
             switch (keyCode) {
+                case KeyEvent.KEYCODE_ENTER:
+                case KeyEvent.KEYCODE_SPACE:
+                case KeyEvent.KEYCODE_DPAD_CENTER:
+                    if (!isPressHeld) {
+                        isPressHeld = true;
+                        Handler handler = new Handler();
+                        handler.postDelayed(() -> {
+                            if (isPressHeld && !isLongPress) {
+                                isLongPress = true;
+                                performSelectedItemLongClick();
+                            }
+                        }, longClickDuration);
+                    }
+                    return true;
                 case KeyEvent.KEYCODE_DPAD_LEFT:
                     _onBackPressedListener.onBackPressed(_alertDialog);
                     lastSelected = false;
